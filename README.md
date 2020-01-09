@@ -1,2 +1,2 @@
 # SciML
-Machine learning in Science
+Machine learning for Engineering applications
