@@ -12,7 +12,7 @@ import tensorflow_probability as tfp
 from pyDOE import lhs
 
 
-class PhisicsInformedNN_solid:
+class PhysicsInformedNN_solid():
 
     # Initialize the class
     def __init__(self, X, layers, lb, ub, E=100.0, nu=0.3, f=0.1, u=None):
@@ -210,9 +210,9 @@ if __name__=="__main__":
     X, Y=np.meshgrid(x, y)
     layers=[2, 20, 20, 2]
 
-    colocation=lhs(n=2 , samples=2000)
-    xclocation, yclocation=colocation[:, 0].reshape((2000, 1)), colocation[:, 1].reshape((2000, 1))
-    yclocation=np.random.rand(2000, 1)
+    colocation=lhs(n=2, samples=2000)
+    xcolocation, ycolocation=colocation[:, 0].reshape((2000, 1)), colocation[:, 1].reshape((2000, 1))
+    ycolocation=np.random.rand(2000, 1)
     xDL=np.zeros(shape=(20, 1))
     yDL=np.linspace(0., 1., 20).reshape(xDL.shape)
     uD=np.zeros ((20, 2))
@@ -226,36 +226,36 @@ if __name__=="__main__":
     fN[:, 1]=0.
 
     for globalsearch_i in range (10):
-        model=PhisicsInformedNN_solid(X, layers, lb, ub)
+        model=PhysicsInformedNN_solid(X, layers, lb, ub)
         # model.weights = model.weights*0.
         # model.biases = model.biases*0.
-#        u = model.net_u(xclocation,xclocation)
-#        epsilon = model.net_epsilon(xclocation,xclocation)
-#        net_stress = model.net_stress (xclocation,xclocation)
+#        u = model.net_u(xcolocation,xcolocation)
+#        epsilon = model.net_epsilon(xcolocation,xcolocation)
+#        net_stress = model.net_stress (xcolocation,xcolocation)
 
-        elastic_energy=model.elastic_energy (xclocation, yclocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
+        elastic_energy=model.elastic_energy(xcolocation, ycolocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
         lr=1.e-1
         opt=tf.keras.optimizers.Adam(learning_rate=lr)
         for i in range (0, 100):
             # stochastic gradient descent
             fN1=np.zeros ((10, 2))*10.
             ith=np.random.choice(1000, size=50, replace=None)
-            x_batch=np.array ([[xclocation[i, 0]] for j in ith])
-            y_batch=np.array ([[yclocation[i, 0]] for j in ith])
+            x_batch=np.array ([[xcolocation[i, 0]] for j in ith])
+            y_batch=np.array ([[ycolocation[i, 0]] for j in ith])
             if i%1==0:
                 print ('step ', i)
-                stop_flag=model.train_step(xclocation, yclocation, xDL, yDL, uD, xN, yN, fN, opt, verbose=True, learning_rate=lr)
+                stop_flag=model.train_step(xcolocation, ycolocation, xDL, yDL, uD, xN, yN, fN, opt, verbose=True, learning_rate=lr)
                 if stop_flag and i>=10:
                     break
             else:
                 stop_flag=model.train_step(x_batch, y_batch, xDL, yDL, uD, xN, yN, fN, opt, verbose=False, learning_rate=lr)
 
         if globalsearch_i==0:
-            lost_old=model.elastic_energy (xclocation, yclocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
+            lost_old=model.elastic_energy (xcolocation, ycolocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
             model_old=model
-        if globalsearch_i>1 and model.elastic_energy (xclocation, yclocation, xDL, yDL, uD, xN, yN, fN, verbose=False)<lost_old:
+        if globalsearch_i>1 and model.elastic_energy (xcolocation, ycolocation, xDL, yDL, uD, xN, yN, fN, verbose=False)<lost_old:
             model_old=model
-            lost_old=model.elastic_energy (xclocation, yclocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
+            lost_old=model.elastic_energy (xcolocation, ycolocation, xDL, yDL, uD, xN, yN, fN, verbose=True)
 
     model=model_old
     ###########################################################################
