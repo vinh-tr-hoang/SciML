@@ -13,7 +13,7 @@ import tensorflow_probability as tfp
 class LinearElasticity():
 
     # Initialize the class
-    def __init__(self, layers, lb, ub, E=100.0, nu=0.3, f=0.1, u=None):
+    def __init__(self, dim, layers, lb, ub, E=100.0, nu=0.3, f=0.1, u=None):
 
         self.mu, self.lamda=E/(2.0*(1.0+nu)), E*nu/((1.0+nu)*(1.0-
         2.0*nu))
@@ -26,6 +26,18 @@ class LinearElasticity():
 
         # Initialize NNs
         self.weights, self.biases=self.initialize_NN(layers)
+
+        if dim==1:
+            self.net_stress=self._net_stress_1d
+            self.strain_mandel=self._strain_mandel_1d
+        elif dim==2:
+            self.net_stress=self._net_stress_2d
+            self.strain_mandel=self._strain_mandel_2d
+        elif dim==3:
+            self.net_stress=self._net_stress_3d
+            self.strain_mandel=self._strain_mandel_3d
+        else:
+            raise ValueError(dim)
 
     def initialize_NN(self, layers):
         weights=[]
@@ -69,75 +81,57 @@ class LinearElasticity():
             g.watch (X)
             u=self.neural_net(X, self.weights, self.biases)
         epsilon=g.batch_jacobian (u, X)
-        # epsilon[:, 0,1] = 0.5 *(epsilon[:, 0,1] + epsilon[:, 1,0])
-        # epsilon[:, 1,0] = 0.5 *(epsilon[:, 0,1] + epsilon[:, 1,0])
-        # gradepsilon = g.batch_jacobian ()
         return epsilon
 
-    def net_stress (self, epsilon):
-        eps_xx=epsilon[:, 0, 0]
-        eps_yy=epsilon[:, 1, 1]
-        eps_xy=epsilon[:, 0, 1]*0.5+epsilon[:, 1, 0]*0.5
-        # sigma = []
-#        sigma_xx = 2*self.mu*eps_xx + self.lamda* (eps_xx + eps_yy)
-#        sigma_yy = 2*self.mu*eps_yy + self.lamda* (eps_xx + eps_yy)
-#        sigma_yx = 2*self.mu*eps_xy
-#        sigmax = tf.concat([sigma_xx,sigma_yx],1)
-#        sigmay = tf.concat([sigma_yx,sigma_yy],1)
-#        sigma = tf.concat([sigmax, sigmay],1)
-#        return sigma
-        sigma_xx=2*self.mu*eps_xx+self.lamda*(eps_xx+eps_yy)
-        sigma_yy=2*self.mu*eps_yy+self.lamda*(eps_xx+eps_yy)
-        sigma_yx=2*self.mu*eps_xy
-        # sigma = tf.concat ([sigma_xx, sigma_yy, sigma_yx],1)
-        return sigma_xx, sigma_yy, sigma_yx
+    def _strain_mandel_1d(self, epsilon):
+        return epsilon
 
-    def net_loss_funct (self, x):
+    def _strain_mandel_2d(self, epsilon):
+        return tf.stack([epsilon[:, 0, 0], epsilon[:, 1, 1],
+                         (epsilon[:, 0, 1]+epsilon[:, 1, 0])/0.5**2], 1)
 
-        with tf.GradientTape() as g:
-            X=tf.convert_to_tensor(x)
-            g.watch (X)
-            sigma_xx, sigma_yy, sigma_xy=self.net_stress(self.net_epsilon(X))
-        print (sigma_xx)
-        gradsigma_xx=g.jacobian (sigma_xx, X)
-        print (gradsigma_xx)
-        gradsigma_yy=g.jacobian (sigma_yy, X)
-        gradsigma_xy=g.jacobian (sigma_xy, X)
-        loss_stress=((gradsigma_xx[:, 0]+gradsigma_xy[:, 1])**2+
-                       (gradsigma_xy[:, 0]+gradsigma_yy[:, 1])**2)
-        if x==self.lb:
-            loss_Dirichlet=(self.net_u (x))**2
-        else:
-            loss_Dirichlet=0
-        if x==self.ub:
-            loss_Neuman=(self.net_u (x)-self.f)**2
-        else:
-            loss_Neuman=0
-        return tf.sqrt(loss_stress+loss_Dirichlet+loss_Neuman)
+    def _strain_mandel_3d(self, epsilon):
+        return tf.stack([epsilon[:, 0, 0], epsilon[:, 1, 1], epsilon[:, 2, 2],
+                         (epsilon[:, 1, 2]+epsilon[:, 2, 1])/0.5**2,
+                         (epsilon[:, 0, 2]+epsilon[:, 2, 0])/0.5**2,
+                         (epsilon[:, 0, 1]+epsilon[:, 1, 0])/0.5**2], 1)
 
-    def elastic_energy (self, x, xD, uD, xN, fN, verbose=False):
+    def _net_stress_1d(self, epsilon):
+        return (3*self.lamda+2*self.mu)*epsilon
+
+    def _net_stress_2d(self, epsilon):
+        eps=self._strain_mandel_2d(epsilon) # Mandels notation
+        sigma_xx=2*self.mu*eps[:,0]+self.lamda*(eps[:,0]+eps[:,1])
+        sigma_yy=2*self.mu*eps[:,1]+self.lamda*(eps[:,0]+eps[:,1])
+        sigma_yx=2*self.mu*eps[:,2]
+        sigma=tf.stack([sigma_xx, sigma_yy, sigma_yx], 1)
+        return sigma
+
+    def _net_stress_3d(self, epsilon):
+        eps=self._strain_mandel_2d(epsilon) # Mandels notation
+        trace_eps=eps[:,0]+eps[:,1]+eps[:,2]
+        sigma=tf.stack([2*self.mu*eps[:,0]+self.lamda*trace_eps,
+                        2*self.mu*eps[:,1]+self.lamda*trace_eps,
+                        2*self.mu*eps[:,2]+self.lamda*trace_eps,
+                        2*self.mu*eps[:,3], 2*self.mu*eps[:,4], 2*self.mu*eps[:,5]], 1)
+        return sigma
+
+    def elastic_energy(self, x, xD, uD, xN, fN, verbose=False):
         epsilon=self.net_epsilon(x)
-        sigma_xx, sigma_yy, sigma_yx=self.net_stress(epsilon)
-        eps_xx=epsilon[:, 0, 0]
-        eps_yy=epsilon[:, 1, 1]
-        eps_xy=epsilon[:, 0, 1]*0.5+epsilon[:, 1, 0]*0.5
-        elastic_energy=0.5*(tf.reduce_mean(sigma_xx*eps_xx)+tf.reduce_mean(sigma_yy*eps_yy)+
-                            2*tf.reduce_mean(sigma_yx*eps_xy))
+        strain=self.strain_mandel(epsilon)
+        sigma=self.net_stress(epsilon)
+#         elastic_energy=0.5*(tf.reduce_mean(sigma_xx*eps_xx)+tf.reduce_mean(sigma_yy*eps_yy)+
+#                             2*tf.reduce_mean(sigma_yx*eps_xy))
+        elastic_energy=0.5*tf.reduce_mean(sigma*strain)
         if verbose:
             print("elastic energy "+str(elastic_energy.numpy()))
 
         UD=self.net_u (xD)
-        loss_Dirichlet=(tf.reduce_mean ((uD[:, 0]-UD[:, 0])**2)*100000.+
-                          tf.reduce_mean ((uD[:, 1]-UD[:, 1])**2)*100000.)
-#        sigmaN_xx, sigmaN_yy, sigmaN_yx = self.net_stress(xN,yN)
+        loss_Dirichlet=tf.reduce_mean((uD-UD)**2)*100000.
+#         loss_Dirichlet=(tf.reduce_mean ((uD[:, 0]-UD[:, 0])**2)*100000.+
+#                           tf.reduce_mean ((uD[:, 1]-UD[:, 1])**2)*100000.)
 #
-#        loss_Neuman = (tf.reduce_mean ((sigmaN_xx-fN[:,0])**2) +
-#                       tf.reduce_mean ((sigmaN_yy-fN[:,1])**2) )
-
         UN=self.net_u (xN)
-#        eps_xx = epsilon[:,0,0]
-#        eps_yy = epsilon[:,1,1]
-#        eps_xy = epsilon[:,0,1]
         loss_Neuman=(tf.reduce_sum (fN*UN))
 #        if verbose:
 #            print("loss_Neuman" + str(loss_Neuman.numpy()))
