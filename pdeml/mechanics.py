@@ -39,21 +39,21 @@ class LinearElasticity():
         else:
             raise ValueError(dim)
 
-    def initialize_NN(self, layers):
+    def initialize_NN(self, layers, sigma = 1.):
         weights=[]
         biases=[]
         num_layers=len(layers)
         for l in range(0, num_layers-1):
-            W=self.xavier_init(size=[layers[l], layers[l+1]])
+            W=self.xavier_init(size=[layers[l], layers[l+1]], sigma = sigma)
             b=tf.Variable(tf.zeros([1, layers[l+1]], dtype=tf.float64), dtype=tf.float64)
             weights.append(W)
             biases.append(b)
         return weights, biases
 
-    def xavier_init(self, size):
+    def xavier_init(self, size, sigma):
         in_dim=size[0]
         out_dim=size[1]
-        xavier_stddev=np.sqrt(2./(in_dim+out_dim))*1.
+        xavier_stddev=np.sqrt(2./(in_dim+out_dim))*sigma
         dist=tfp.distributions.Normal(loc=0., scale=xavier_stddev)
 
         return tf.Variable(dist.sample([in_dim, out_dim]), dtype=tf.float64)
@@ -116,7 +116,7 @@ class LinearElasticity():
                         2*self.mu*eps[:,3], 2*self.mu*eps[:,4], 2*self.mu*eps[:,5]], 1)
         return sigma
 
-    def elastic_energy(self, x, xD, uD, xN, fN, verbose=False):
+    def elastic_energy(self, x, xD, uD, xN, fN, verbose=False):#Should rename to potential energy
         epsilon=self.net_epsilon(x)
         strain=self.strain_mandel(epsilon)
         sigma=self.net_stress(epsilon)
@@ -138,7 +138,7 @@ class LinearElasticity():
 #            print("loss_Dirichlet" + str(loss_Dirichlet.numpy()))
         return elastic_energy+loss_Dirichlet-loss_Neuman
 
-    def train_step(self, x, xD, uD, xN, fN, opt, verbose=False, learning_rate=0.1):
+    def train_step(self, x, xD, uD, xN, fN, opt, verbose=False, learning_rate=0.1, min_learning_rate = 1e-8):
         stop_flag=0.
         weights_old=[self.weights[i].read_value() for i in range (len (self.weights))]
         biases_old=[self.biases[i].read_value() for i in range (len (self.biases))]
@@ -161,7 +161,7 @@ class LinearElasticity():
             print ('loss_value before first updated (line search)'+str(self.elastic_energy(x, xD, uD, xN, fN).numpy()))
 
         # implement tree search
-        while loss_old<self.elastic_energy(x, xD, uD, xN, fN).numpy() and learning_rate>1e-5:
+        while loss_old<self.elastic_energy(x, xD, uD, xN, fN).numpy() and learning_rate > min_learning_rate:
             i=i+1
             learning_rate=learning_rate/2.
             if verbose:
@@ -180,8 +180,28 @@ class LinearElasticity():
                 self.biases[i].assign(biases_old[i])
         if verbose:
             print ('loss_value last updated (line search)'+str(self.elastic_energy(x, xD, uD, xN, fN).numpy()))
+        self.lr = learning_rate
         return stop_flag
-  # tf.optimizer.apply_gradients(zip(grads, self.weights))
+    def stochastic_gradient_descent (self, x, xD, uD, xN, fN, opt, epoch, batchsize, verbose=False, learning_rate=0.1, min_learning_rate = 1e-8):
+        nbcolopoint = x.shape[0]
+        for i in range (0, epoch):
+            ith=np.random.choice(nbcolopoint, size = batchsize, replace=None)
+            x_batch=x[ith]
+            print ('step ', i)
+            if i ==0:
+                learning_rate = learning_rate
+            else:
+                learning_rate = min (self.lr*4, 1.) # addaptive learning rate 
+            stop_flag=self.train_step(x_batch, xD, uD, xN, fN, opt, verbose=verbose, learning_rate=learning_rate, min_learning_rate = min_learning_rate)
+            if stop_flag: #and i>=10:
+                print ('early stoping because learning rate is smaller than minimum value of ' + str(min_learning_rate) )
+                break
+
+
+        
+        
+        
+        # tf.optimizer.apply_gradients(zip(grads, self.weights))
 
 
 if __name__=="__main__":
